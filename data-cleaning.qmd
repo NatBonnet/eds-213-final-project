@@ -1,0 +1,211 @@
+---
+title: "Data cleaning for final project"
+author: "Nathalie Bonnet"
+date: 04/22/2026
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(here)
+library(lubridate)
+library(readxl)
+```
+
+# Cleaning nors data
+
+## Reading in raw CSV file and checking that data types appear correctly
+```{r}
+nors_data <- read.csv(here("data", "raw", "NORS_20260422.csv")) %>% 
+  clean_names()
+
+glimpse(nors_data)
+```
+
+## View top categories that etiology and setting data fall into
+
+I'm most interested in using state, etiology, setting, and ifsac category to understand if there are patterns in food poisoning cases between states. 
+
+```{r}
+nors_data %>%
+  count(etiology, sort = TRUE) %>%
+  as.data.frame() %>%
+  head(50)
+
+nors_data %>%
+  count(setting, sort = TRUE) %>%
+  as.data.frame() %>%
+  head(50)
+```
+
+## Etiology and setting mapping
+Etiology and setting have a lot of unique values, but can generally be classified into broader categories
+```{r}
+# Map top pathogens and use keyword matching for the rest
+etiology_category_map <- function(etiology) {
+  case_when(
+    is.na(etiology) | etiology == "" ~ "Unknown",
+    
+    # Viral
+    grepl(
+      "Norovirus|Hepatitis A|Rotavirus|Sapovirus|Astrovirus|Adenovirus|Other - Virus|Enterovirus",
+      etiology,
+      ignore.case = TRUE
+    ) ~ "Viral",
+    
+    # Bacterial
+    grepl(
+      "Salmonella|Escherichia|Shigella|Clostridium|Campylobacter|Listeria|Legionella|Staphylococcus|Bacillus|Vibrio|Yersinia|Brucella|Cronobacter|Other - Bacterium|Pseudomonas|Streptococcus|Plesiomonas|Leptospira|Enterobacter|Enterococcus|Mycobacterium|Pantoea",
+      etiology,
+      ignore.case = TRUE
+    ) ~ "Bacterial",
+    
+    # Chemical
+    grepl(
+      "Copper|Selenium|Zinc|Mercury|Lead|Pesticide|Scombrotoxin|Ciguatoxin|Chemical|Toxin|Histamine|Chlorine|Chloramine|Fluoride|Heavy metal|Sodium Hydroxide|Cleaning|Soap|Nitrite|Nitrate|Arsenic|Chromium|Bromate|Bromine|Phenol|Gasoline|Toluene|Xylene|Ethyl|Morpholine|Herbicide|Trichloroethylene|Hydrochloric|Alkaline Water|Oil|Microcystis|Microcoleus|shellfish poison|Paralytic|Neurotoxic|Amnesic",
+      etiology,
+      ignore.case = TRUE
+    ) ~ "Chemical",
+    
+    # Parasitic
+    grepl(
+      "Cryptosporidium|Giardia|Cyclospora|Trichinella|Toxoplasma|Anisakis|Other - Parasite|Avian schistosomes|Entamoeba|Naegleria",
+      etiology,
+      ignore.case = TRUE
+    ) ~ "Parasitic",
+    # Others
+    grepl("Unknown|unknown", etiology) ~ "Unknown",
+    TRUE ~ "Other"
+  )
+}
+
+# Setting mapping
+setting_category_map <- function(setting) {
+  case_when(
+    is.na(setting) | setting == "" ~ "Unknown",
+    grepl("Unknown", setting, ignore.case = TRUE) ~ "Unknown",
+    grepl(
+      "Restaurant|Caterer|Banquet|Bar|Cafeteria|Food service",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Food Service",
+    grepl(
+      "Long-term care|nursing home|assisted living|Hospital|Healthcare",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Healthcare",
+    grepl(
+      "School|college|university|Child daycare|preschool",
+      setting,
+      ignore.case = TRUE
+    ) ~ "School",
+    grepl(
+      "Private home|residence|Apartment|Condo",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Home",
+    grepl(
+      "Church|Camp|Fair|Festival|Reception|Wedding|Religious|Event space",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Event",
+    grepl(
+      "Prison|Correctional|Shelter|group home|transitional",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Institution",
+    grepl(
+      "Grocery|Bakery|Deli|convenience store",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Store",
+    grepl("Hotel|motel|Resort", setting, ignore.case = TRUE) ~ "Hotel/Resort",
+    grepl("Farm|dairy|agricultural", setting, ignore.case = TRUE) ~ "Agricultural",
+    grepl("Park|Beach|Outdoor|Recreation", setting, ignore.case = TRUE) ~ "Recreation",
+    grepl(
+      "Office|workplace|Community|municipality|Subdivision|Neighborhood|Other",
+      setting,
+      ignore.case = TRUE
+    ) ~ "Other",
+    
+    TRUE ~ "Other"
+  )
+}
+
+# Create new clean dataset to hold updated data categories
+nors_clean <- nors_data %>%
+  mutate(etiology_category = etiology_category_map(etiology),
+         setting_category  = setting_category_map(setting))
+
+# Verify coverage
+nors_clean %>% count(etiology_category, sort = TRUE)
+nors_clean %>% count(setting_category, sort = TRUE)
+```
+
+## Dropping columns that will not be useful in a database
+
+- Too many serotypes to meaningfully analyze across time and state
+- info on hospitalizations and info on deaths 
+- food truck type has too many unique options
+```{r}
+nors_clean <- nors_clean %>% 
+  select(! c(serotype_or_genotype, info_on_hospitalizations, info_on_deaths))
+```
+
+
+
+# Cleaning U.S. Census Data to join
+
+```{r}
+pov_census <- readxl::read_xls(here("data", "raw", "est23us.xls"), sheet = 1, skip = 3) %>% 
+  clean_names()
+
+glimpse(pov_census)
+
+pop_census <- read.csv(here("data", "apportionment.csv")) %>% 
+  clean_names()
+
+glimpse(pop_census)
+
+clean_pov <- pov_census %>% 
+  select(state_fips_code, postal_code, name, poverty_estimate_all_ages) %>% 
+  mutate(poverty_estimate_all_ages = as.numeric(gsub(",", "", poverty_estimate_all_ages)))
+
+clean_pop <- pop_census %>% 
+  select(name, geography_type, year, resident_population) %>% 
+  mutate(resident_population = as.numeric(gsub(",", "", resident_population)))
+
+census_join <- clean_pov %>% 
+  left_join(clean_pop, by = 'name') %>% 
+  mutate(poverty_rate = poverty_estimate_all_ages / resident_population * 100)
+
+names(census_join)
+names(nors_clean)
+```
+```{r}
+# NORS - select and rename to match schema
+nors_clean <- nors_clean %>%
+  mutate(
+    illnesses = as.integer(illnesses),
+    hospitalizations = as.integer(hospitalizations),
+    deaths = as.integer(deaths)
+  )
+
+# Census - select and rename to match schema
+census_clean <- census_join %>%
+  filter(geography_type == "State") %>%
+  select(state = name, year, population = resident_population, poverty_rate) %>%
+  mutate(census_id = row_number()) %>%
+  select(census_id, everything())
+
+names(nors_clean)
+```
+
+
+```{r}
+# Write to CSV
+write.csv(nors_clean, here("data", "processed", "outbreaks.csv"), row.names = FALSE, na = "")
+write.csv(census_clean, here("data", "processed", "census.csv"), row.names = FALSE)
+```
+
