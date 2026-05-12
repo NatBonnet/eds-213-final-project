@@ -35,3 +35,49 @@ COPY outbreaks (outbreak_id, year, month, state, primary_mode, etiology,
 FROM 'data/processed/outbreaks.csv'
 DELIMITER ',' CSV HEADER;
 
+-- Exploratory queries
+
+-- Return summary of case counts for each etiology category
+SELECT * FROM outbreaks;
+
+SELECT COUNT(etiology_category), ANY_VALUE(etiology_category) FROM outbreaks
+GROUP BY (etiology_category)
+ORDER BY COUNT(*) DESC;
+
+SELECT COUNT(etiology_category), ANY_VALUE(etiology_category) FROM outbreaks
+GROUP BY (etiology_category)
+ORDER BY COUNT(*) DESC;
+
+-- Return the top 10 case counts by etiology and state
+SELECT COUNT(*), ANY_VALUE(etiology_category), ANY_VALUE(state) FROM outbreaks
+GROUP BY (etiology_category, state)
+ORDER BY COUNT(*) DESC
+LIMIT 10;
+
+-- Find death rate for cases reported by etiology
+SELECT SUM(deaths)/COUNT(deaths) *100 AS death_rate, etiology_category
+FROM outbreaks
+GROUP BY etiology_category;
+
+SELECT *  FROM census;
+
+SELECT 
+    o.state,
+    SUM(o.illnesses) AS total_illnesses,
+    AVG(c.avg_population) AS avg_population,
+    AVG(c.avg_poverty_rate) AS avg_poverty_rate,
+    SUM(o.illnesses) / AVG(c.avg_population) * 100000 AS illnesses_per_100k, 
+    SUM(o.hospitalizations) / AVG(c.avg_population) * 100000 AS hospitalizations_per_100k, 
+    SUM(o.deaths) / AVG(c.avg_population) * 100000 AS deaths_per_100k
+FROM outbreaks AS o
+LEFT JOIN (
+    SELECT state, AVG(population) AS avg_population, AVG(poverty_rate) AS avg_poverty_rate
+    FROM census
+    GROUP BY state
+) AS c ON o.state = c.state
+GROUP BY o.state
+ORDER BY deaths_per_100k DESC;
+
+SELECT state, MAX(poverty_rate)
+FROM census
+GROUP BY state;

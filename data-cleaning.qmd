@@ -132,27 +132,47 @@ setting_category_map <- function(setting) {
     TRUE ~ "Other"
   )
 }
+```
 
+```{r}
 # Create new clean dataset to hold updated data categories
 nors_clean <- nors_data %>%
   mutate(etiology_category = etiology_category_map(etiology),
-         setting_category  = setting_category_map(setting))
+         setting_category  = setting_category_map(setting)) %>%
+  select(!c(
+    serotype_or_genotype,
+    info_on_hospitalizations,
+    info_on_deaths,
+    food_vehicle, 
+    water_type, 
+    animal_type
+  )) %>%
+  mutate(
+    illnesses = as.integer(illnesses),
+    illnesses = ifelse(is.na(illnesses), 0, illnesses),
+    hospitalizations = as.integer(hospitalizations),
+    hospitalizations = ifelse(is.na(hospitalizations), 0, hospitalizations),
+    deaths = as.integer(deaths),
+    deaths = ifelse(is.na(deaths), 0, deaths),
+    
+   food_contaminated_ingredient = ifelse(
+  grepl("^\\s*$", food_contaminated_ingredient) | is.na(food_contaminated_ingredient),
+  NA,
+  food_contaminated_ingredient), 
+  
+  ifsac_category = ifelse(grepl("^\\s*$", ifsac_category) | is.na(ifsac_category),
+  NA,
+  ifsac_category), 
+  
+  water_exposure = ifelse(grepl("^\\s*$", water_exposure) | is.na(water_exposure),
+  NA,
+  water_exposure)
+  )
 
 # Verify coverage
 nors_clean %>% count(etiology_category, sort = TRUE)
 nors_clean %>% count(setting_category, sort = TRUE)
 ```
-
-## Dropping columns that will not be useful in a database
-
-- Too many serotypes to meaningfully analyze across time and state
-- info on hospitalizations and info on deaths 
-- food truck type has too many unique options
-```{r}
-nors_clean <- nors_clean %>% 
-  select(! c(serotype_or_genotype, info_on_hospitalizations, info_on_deaths))
-```
-
 
 
 # Cleaning U.S. Census Data to join
@@ -163,44 +183,34 @@ pov_census <- readxl::read_xls(here("data", "raw", "est23us.xls"), sheet = 1, sk
 
 glimpse(pov_census)
 
-pop_census <- read.csv(here("data", "apportionment.csv")) %>% 
+pop_census <- read.csv(here("data", "raw", "apportionment.csv")) %>% 
   clean_names()
 
 glimpse(pop_census)
 
 clean_pov <- pov_census %>% 
-  select(state_fips_code, postal_code, name, poverty_estimate_all_ages) %>% 
-  mutate(poverty_estimate_all_ages = as.numeric(gsub(",", "", poverty_estimate_all_ages)))
+  select(state_fips_code, postal_code, name, poverty_percent_all_ages)
 
 clean_pop <- pop_census %>% 
   select(name, geography_type, year, resident_population) %>% 
   mutate(resident_population = as.numeric(gsub(",", "", resident_population)))
 
 census_join <- clean_pov %>% 
-  left_join(clean_pop, by = 'name') %>% 
-  mutate(poverty_rate = poverty_estimate_all_ages / resident_population * 100)
+  left_join(clean_pop, by = 'name')
 
-names(census_join)
-names(nors_clean)
-```
-```{r}
-# NORS - select and rename to match schema
-nors_clean <- nors_clean %>%
-  mutate(
-    illnesses = as.integer(illnesses),
-    hospitalizations = as.integer(hospitalizations),
-    deaths = as.integer(deaths)
-  )
-
-# Census - select and rename to match schema
-census_clean <- census_join %>%
+census_clean <- census_join %>% 
+  # Fiter for only states, not entire U.S.
   filter(geography_type == "State") %>%
-  select(state = name, year, population = resident_population, poverty_rate) %>%
-  mutate(census_id = row_number()) %>%
-  select(census_id, everything())
+  # Select only state name, year, and population
+  rename(state = name, population = resident_population, poverty_perc = poverty_percent_all_ages) %>% 
+  group_by(year, state) %>% 
+  mutate(est_poverty_pop = as.integer(poverty_perc/100 * population)) %>% 
+  ungroup()
 
+names(census_clean)
 names(nors_clean)
 ```
+
 
 
 ```{r}
