@@ -3,35 +3,36 @@ CREATE TABLE census (
     census_id    INTEGER PRIMARY KEY,
     state        TEXT NOT NULL,
     year         INTEGER NOT NULL,
-    population   INTEGER NOT NULL,
-    poverty_rate REAL
+    population   INTEGER,
+    poverty_perc REAL
 );
 
 CREATE TABLE outbreaks (
-    outbreak_id       INTEGER PRIMARY KEY,
-    year              INTEGER NOT NULL,
-    month             INTEGER,
-    state             TEXT NOT NULL,
-    primary_mode      TEXT,
-    etiology          TEXT,
-    etiology_status   TEXT,
+    outbreak_id      INTEGER PRIMARY KEY,
+    year             INTEGER NOT NULL,
+    month            INTEGER,
+    state            TEXT,
+    primary_mode     TEXT,
+    etiology         TEXT,
+    etiology_status  TEXT,
+    setting          TEXT,
+    ifsac_category   TEXT,
+    illnesses        INTEGER,
+    hospitalizations INTEGER,
+    deaths           INTEGER,
     etiology_category TEXT,
-    setting_category  TEXT,
-    ifsac_category    TEXT,
-    illnesses         INTEGER,
-    hospitalizations  INTEGER,
-    deaths            INTEGER
+    setting_category  TEXT
 );
 ---------------------------------------------------------------------------------------------------------------------
 
 -- Copy in data to tables
-COPY census (census_id, state, year, population, poverty_rate)
+COPY census (census_id, state, year, population, poverty_perc)
 FROM 'data/processed/census.csv'
 DELIMITER ',' CSV HEADER;
 
 COPY outbreaks (outbreak_id, year, month, state, primary_mode, etiology,
-                etiology_status, ifsac_category, illnesses, hospitalizations,
-                deaths, etiology_category, setting_category)
+                etiology_status, setting, illnesses, hospitalizations,
+                deaths, ifsac_category, etiology_category, setting_category)
 FROM 'data/processed/outbreaks.csv'
 DELIMITER ',' CSV HEADER;
 
@@ -39,10 +40,6 @@ DELIMITER ',' CSV HEADER;
 
 -- Return summary of case counts for each etiology category
 SELECT * FROM outbreaks;
-
-SELECT COUNT(etiology_category), ANY_VALUE(etiology_category) FROM outbreaks
-GROUP BY (etiology_category)
-ORDER BY COUNT(*) DESC;
 
 SELECT COUNT(etiology_category), ANY_VALUE(etiology_category) FROM outbreaks
 GROUP BY (etiology_category)
@@ -65,19 +62,22 @@ SELECT
     o.state,
     SUM(o.illnesses) AS total_illnesses,
     AVG(c.avg_population) AS avg_population,
-    AVG(c.avg_poverty_rate) AS avg_poverty_rate,
+    AVG(c.avg_poverty_perc) AS avg_poverty_rate,
     SUM(o.illnesses) / AVG(c.avg_population) * 100000 AS illnesses_per_100k, 
     SUM(o.hospitalizations) / AVG(c.avg_population) * 100000 AS hospitalizations_per_100k, 
     SUM(o.deaths) / AVG(c.avg_population) * 100000 AS deaths_per_100k
 FROM outbreaks AS o
 LEFT JOIN (
-    SELECT state, AVG(population) AS avg_population, AVG(poverty_rate) AS avg_poverty_rate
+    SELECT state, AVG(population) AS avg_population, AVG(poverty_perc) AS avg_poverty_perc
     FROM census
     GROUP BY state
 ) AS c ON o.state = c.state
 GROUP BY o.state
-ORDER BY deaths_per_100k DESC;
+ORDER BY illnesses_per_100k DESC;
 
-SELECT state, MAX(poverty_rate)
+
+
+
+SELECT state, MAX(poverty_perc)
 FROM census
 GROUP BY state;

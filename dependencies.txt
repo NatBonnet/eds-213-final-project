@@ -1,1 +1,71 @@
-# document either package versions or python environment or pips
+Package versions used in R processing:
+================================================================================
+ENVIRONMENT & DEPENDENCIES
+================================================================================
+
+R version: 4.4.3 (2025-02-28 ucrt)
+
+--------------------------------------------------------------------------------
+CORE PACKAGES
+--------------------------------------------------------------------------------
+
+Package       Version   Purpose
+---------     -------   -------------------------------------------------------
+tidyverse     2.0.0     Meta-package (ggplot2, dplyr, tidyr, readr, purrr,
+                        tibble, stringr, forcats)
+ggplot2       4.0.1     Visualization
+dplyr         1.1.4     Data manipulation
+tidyr         1.3.1     Data reshaping
+readr         2.1.5     CSV / flat file I/O
+readxl        1.4.5     Excel file I/O
+dbplyr        2.5.2     Database backend for dplyr
+lubridate     1.9.4     Date/time handling
+stringr       1.5.1     String manipulation
+forcats       1.0.0     Factor handling
+purrr         1.0.4     Functional programming
+tibble        3.2.1     Modern data frames
+
+--------------------------------------------------------------------------------
+GEOSPATIAL
+--------------------------------------------------------------------------------
+
+Package       Version   Purpose
+---------     -------   -------------------------------------------------------
+sf            1.0-21    Simple features / vector spatial data
+tilegramsR    0.2.0     Tilegram spatial layouts
+geofacet      0.2.4     Geographic faceting for ggplot2
+
+--------------------------------------------------------------------------------
+VISUALIZATION
+--------------------------------------------------------------------------------
+
+Package       Version   Purpose
+---------     -------   -------------------------------------------------------
+plotly        4.11.0    Interactive plots
+ggrepel       0.9.6     Non-overlapping plot labels
+
+--------------------------------------------------------------------------------
+UTILITIES
+--------------------------------------------------------------------------------
+
+Package       Version   Purpose
+---------     -------   -------------------------------------------------------
+here          1.0.2     Project-relative file paths
+janitor       2.2.1     Data cleaning helpers
+
+================================================================================
+INSTALLATION
+================================================================================
+
+install.packages(c(
+  "tidyverse", "readxl", "dbplyr", "lubridate",
+  "sf", "tilegramsR", "geofacet",
+  "plotly", "ggrepel",
+  "here", "janitor"
+))
+
+NOTE: sf requires system-level geospatial libraries (GDAL, GEOS, PROJ).
+      See https://r-spatial.github.io/sf/#installing for platform-specific
+      instructions.
+
+================================================================================

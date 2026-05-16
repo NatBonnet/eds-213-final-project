@@ -4,7 +4,7 @@ author: "Nathalie Bonnet"
 date: 04/22/2026
 format: html
 ---
-
+# Step 1. Loading necessary libraries
 ```{r}
 library(tidyverse)
 library(janitor)
@@ -13,14 +13,18 @@ library(lubridate)
 library(readxl)
 ```
 
-# Cleaning nors data
+# Step 2.Cleaning nors data
 
 ## Reading in raw CSV file and checking that data types appear correctly
 ```{r}
+# Read in NORS data and standardize names
 nors_data <- read.csv(here("data", "raw", "NORS_20260422.csv")) %>% 
   clean_names()
 
+# Evaluate data format to see if columns are appropriate
+min(nors_data$year)
 glimpse(nors_data)
+names(nors_data)
 ```
 
 ## View top categories that etiology and setting data fall into
@@ -28,6 +32,7 @@ glimpse(nors_data)
 I'm most interested in using state, etiology, setting, and ifsac category to understand if there are patterns in food poisoning cases between states. 
 
 ```{r}
+# Count how many unique values are in etiology and setting categories
 nors_data %>%
   count(etiology, sort = TRUE) %>%
   as.data.frame() %>%
@@ -39,8 +44,8 @@ nors_data %>%
   head(50)
 ```
 
-## Etiology and setting mapping
-Etiology and setting have a lot of unique values, but can generally be classified into broader categories
+## Step 3. Etiology and setting mapping
+Etiology and setting have a lot of unique values, but can generally be classified into broader categories. To do this I created functions to match string values to categories
 ```{r}
 # Map top pathogens and use keyword matching for the rest
 etiology_category_map <- function(etiology) {
@@ -134,11 +139,15 @@ setting_category_map <- function(setting) {
 }
 ```
 
+# Step 4. Map categories that will be used for analysis onto data
+I then applied these new categories to the original data. 
+
 ```{r}
 # Create new clean dataset to hold updated data categories
 nors_clean <- nors_data %>%
   mutate(etiology_category = etiology_category_map(etiology),
          setting_category  = setting_category_map(setting)) %>%
+  # Select only columns of interest
   select(!c(
     serotype_or_genotype,
     info_on_hospitalizations,
@@ -147,6 +156,7 @@ nors_clean <- nors_data %>%
     water_type, 
     animal_type
   )) %>%
+  # Ensure that all numeric values are in fact numeric
   mutate(
     illnesses = as.integer(illnesses),
     illnesses = ifelse(is.na(illnesses), 0, illnesses),
@@ -154,7 +164,7 @@ nors_clean <- nors_data %>%
     hospitalizations = ifelse(is.na(hospitalizations), 0, hospitalizations),
     deaths = as.integer(deaths),
     deaths = ifelse(is.na(deaths), 0, deaths),
-    
+  # Ensure that any values that fall outside categories are NA
    food_contaminated_ingredient = ifelse(
   grepl("^\\s*$", food_contaminated_ingredient) | is.na(food_contaminated_ingredient),
   NA,
@@ -169,25 +179,28 @@ nors_clean <- nors_data %>%
   water_exposure)
   )
 
-# Verify coverage
+# Verify coverage in data
 nors_clean %>% count(etiology_category, sort = TRUE)
 nors_clean %>% count(setting_category, sort = TRUE)
 ```
 
 
-# Cleaning U.S. Census Data to join
+# Step 5. Cleaning U.S. Census Data to join
 
 ```{r}
+# Import poverty dataset
 pov_census <- readxl::read_xls(here("data", "raw", "est23us.xls"), sheet = 1, skip = 3) %>% 
   clean_names()
-
+# Overview of values
 glimpse(pov_census)
 
+# Import population data
 pop_census <- read.csv(here("data", "raw", "apportionment.csv")) %>% 
   clean_names()
-
+# Overview 
 glimpse(pop_census)
 
+# Select desired columns- filtering out those that I will not use in analysis
 clean_pov <- pov_census %>% 
   select(state_fips_code, postal_code, name, poverty_percent_all_ages)
 
@@ -195,23 +208,37 @@ clean_pop <- pop_census %>%
   select(name, geography_type, year, resident_population) %>% 
   mutate(resident_population = as.numeric(gsub(",", "", resident_population)))
 
+# Join population data onto poverty data
 census_join <- clean_pov %>% 
   left_join(clean_pop, by = 'name')
 
+# Clean up joined data
 census_clean <- census_join %>% 
-  # Fiter for only states, not entire U.S.
+  # Filter for only states, not entire U.S.
   filter(geography_type == "State") %>%
   # Select only state name, year, and population
   rename(state = name, population = resident_population, poverty_perc = poverty_percent_all_ages) %>% 
   group_by(year, state) %>% 
-  mutate(est_poverty_pop = as.integer(poverty_perc/100 * population)) %>% 
+  # Calculate the percentage of population in poverty by year for each state
+  #mutate(est_poverty_pop = as.integer(poverty_perc/100 * population)) %>% 
   ungroup()
 
-names(census_clean)
-names(nors_clean)
+# Add a new column for census id
+census_clean <- census_clean %>%
+  select(state, year, population, poverty_perc) %>%
+  mutate(census_id = row_number()) %>%
+  select(census_id, everything())
+
+# Remove food type and water exposure columns because they are not useful in analysis
+nors_clean <- nors_clean %>%
+  select(-food_contaminated_ingredient, -water_exposure) %>%
+  # Create an outbreak identifier for each row
+  mutate(outbreak_id = row_number()) %>%
+  select(outbreak_id, everything())
+
 ```
 
-
+# Step 6. Write everything to CSVs to be used in a dataframe
 
 ```{r}
 # Write to CSV
