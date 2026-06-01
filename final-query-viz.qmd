@@ -1,0 +1,217 @@
+---
+title: "final-query-viz"
+format: html
+---
+# Setup
+Import necessary packages
+
+```{r}
+library(tidyverse)
+library(ggrepel)
+library(geofacet)
+library(tilegramsR)
+library(sf)
+library(plotly)
+```
+
+Setup connection from DuckDB database
+
+```{r}
+# Establish connection
+conn <- DBI::dbConnect(duckdb::duckdb(), 
+                       dbdir = "food_poisoning.duckdb")
+conn
+
+# List all tables in connection
+DBI::dbListTables(conn)
+
+# Load all tables
+census <- tbl(conn, "census")
+outbreaks <- tbl(conn, "outbreaks")
+```
+
+# Clean data
+
+```{r}
+# Summarize outbreak severity
+state_severity <- outbreaks %>%
+  # Join outbreaks with census
+  left_join(
+    census %>%
+      # Group by state in census table
+      group_by(state) %>%
+      summarise(
+        # Calculate average population and poverty percentage
+        avg_population = mean(population, na.rm = TRUE),
+        avg_poverty_perc = mean(poverty_perc, na.rm = TRUE)
+      ),
+    # Join on state
+    by = "state"
+  ) %>%
+  # Group by state again in joined table
+  group_by(state) %>%
+  summarise(
+    # Average illnesses, hospitalizations, and death by 100k people in each state
+        illnesses_per_100k = sum(illnesses, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000,
+    deaths_per_100k = sum(deaths, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000,
+    hospitalizations_per_100k = sum(hospitalizations, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000
+  ) %>%
+  # Gather results in readble table
+  collect()
+```
+
+# Create state lookup table to use in mapping off names
+
+```{r}
+# state abbreviation lookup table to allow geofacet or tilegrams to aggregate tiles by state
+abbrev_lookup <- data.frame(
+  abbrev = state.abb,
+  state_name = state.name
+) %>%
+  # Use DC abbreviation to override matching issues
+  bind_rows(data.frame(abbrev = "DC", state_name = "District Of Columbia"))
+
+# Join lookup to geofacet data to allow mapping
+hex_data <- sf_NPR1to1 %>%
+  left_join(abbrev_lookup, by = c("state" = "abbrev")) %>%
+  # Join state severity table to plot results
+  left_join(
+    state_severity %>% mutate(state = str_to_title(state)),
+    by = c("state_name" = "state")
+  )
+```
+
+# Visualizations
+
+First I tried making a geofacet map
+
+```{r}
+# Use geofacet packge to map state tiles
+state_severity %>%
+  mutate(state = str_to_title(state)) %>%
+  # Join state names from outcomes to geofacet package coordinates
+  left_join(us_state_grid2, by = c("state" = "name")) %>%
+  # Plot by state tiles
+  ggplot(aes(x = col, 
+             y = -row, 
+             # Fill with illness data from state severity
+             fill = illnesses_per_100k)) +
+  # Fill background with white
+  geom_tile(color = "white", size = 0.5) +
+  # Remove labels visually
+  geom_text(aes(label = code), color = "white", size = 3, fontface = "bold") +
+  # Use viridis color palette
+  scale_fill_viridis_c(
+    option = "magma",
+    # Legend label
+    name = "Illnesses\nper 100k",
+    # Darker colors are higher values
+    direction = -1
+  ) +
+  # Add labels
+  labs(
+    title = "Foodborne Illness Rates by State",
+    subtitle = "Higher poverty states tend to show greater outbreak burden",
+    caption = "Source: CDC NORS & Census Bureau"
+  ) +
+  # Remove other random labels
+  theme_void() +
+  # Format title and legend text
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey40"),
+    legend.position = "right"
+  )
+```
+
+Then I wanted to try another package for fun! I liked the look of hexagonal state shapes. This is essentially the same process but using {tilegramsR}. 
+
+```{r}
+# Rinse and repeat first map
+ggplot(hex_data) +
+  geom_sf(aes(fill = illnesses_per_100k), color = "white", size = 0.5) +
+  geom_sf_text(aes(label = state), color = "white", size = 2.5, fontface = "bold") +
+  scale_fill_viridis_c(
+    option = "viridis",
+    name = "Illnesses\nper 100k",
+    direction = -1,
+      ) +
+  labs(
+    title = "Foodborne Illness Rates by State",
+    caption = "Source: CDC NORS & Census Bureau"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey40"),
+    legend.position = "right"
+  )
+```
+Based on this map, I was interested to see what might be going on with the states that appeared to have higher illness rates. I therefore made flagged state labels to call them out in my final plot. 
+
+In this plot I evaluated illness rates against poverty rates by state. I was surprised to see that there was a negative trend between the two. I expected there to be higher food poisoning illness cases in states with higher poverty rates due to the presence of food deserts and potentially less access to fresh groceries. However, the map and the plot elucidated the opposite. 
+
+This caused me to dig into epidemiology issues, and learned that this is a common calculation issue in epidemiology. States with higher tourism rates or smaller populations artificially look like they have worse health outcomes. This is due to how illnesses are classically calculated against populations, where tourists are not calculated in the state population but still report food poisoning in those states, inflating the reported illnesses in those areas. In states with small populations, even moderate numbers of food poisoning cases result in high calculations of illnesses per people. 
+
+This is apparently a common issue, and one that is inherent in the data, not necessarily solvable with a different calculation. I would try a weighted mean if I were to rerun this analysis. 
+
+```{r}
+# Flag notable states to label based on interesting trends from map
+notable <- c("New Hampshire", "Nevada", "Rhode Island", "Maine", 
+             "Mississippi", "Louisiana", "West Virginia", "California")
+
+# Highlight cases with high death rates or illness rates
+state_severity %>%
+  mutate(
+    state = str_to_title(state),
+    highlight = case_when(
+      illnesses_per_100k > 2500 ~ "High Illness Rate",
+      deaths_per_100k > 7 ~ "High Death Rate",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  # Plot on poverty rate and illness rate
+  ggplot(aes(x = avg_poverty_perc, y = illnesses_per_100k)) +
+  # Plot data points
+  geom_point(aes(color = highlight, size = deaths_per_100k), alpha = 0.8) +
+  # Plot linear fit to assess if there appears to be a trend
+  geom_smooth(method = "lm", se = TRUE, color = "#34B162", linewidth = 0.8) +
+  # Add labels to specific data points
+  geom_label_repel(
+    data = . %>%
+    filter(state %in% notable),
+    aes(label = state),
+    size = 3,
+    max.overlaps = 20,
+    box.padding = 0.4
+  ) +
+  # Fill values of interest
+  scale_color_manual(
+    values = c("High Illness Rate" = "#360855", 
+               "High Death Rate" = "#245D7C", 
+               "Other" = "#34B162"),
+    name = NULL
+  ) +
+  # Scale size bubbles to not look as dramatic
+  scale_size_continuous(name = "Deaths per 100k", range = c(2, 10)) +
+  # Scale y axis to adjust plot size
+  scale_y_continuous(limits = c(0, 3500)) +
+  # Add labels
+  labs(
+    title = "Poverty Rate vs. Foodborne Illness Burden by State",
+    x = "Average Poverty Rate (%)",
+    y = "Illnesses per 100k",
+    caption = "Source: CDC NORS & Census Bureau"
+  ) +
+  # Adjust theme
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey40"),
+    legend.position = "bottom"
+  )
+```
+# Close connection!
+```{r}
+DBI::dbDisconnect(conn, shutdown = TRUE)
+```
