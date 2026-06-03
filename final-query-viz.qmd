@@ -32,6 +32,7 @@ outbreaks <- tbl(conn, "outbreaks")
 
 # Clean data
 
+
 ```{r}
 # Summarize outbreak severity
 state_severity <- outbreaks %>%
@@ -52,13 +53,15 @@ state_severity <- outbreaks %>%
   group_by(state) %>%
   summarise(
     # Average illnesses, hospitalizations, and death by 100k people in each state
-        illnesses_per_100k = sum(illnesses, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000,
+    illnesses_per_100k = sum(illnesses, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000,
     deaths_per_100k = sum(deaths, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000,
-    hospitalizations_per_100k = sum(hospitalizations, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000
+    hospitalizations_per_100k = sum(hospitalizations, na.rm = TRUE) / mean(avg_population, na.rm = TRUE) * 100000,
+    avg_poverty_perc = mean(avg_poverty_perc, na.rm = TRUE)  # add this
   ) %>%
   # Gather results in readble table
   collect()
 ```
+
 
 # Create state lookup table to use in mapping off names
 
@@ -168,8 +171,7 @@ state_severity %>%
       illnesses_per_100k > 2500 ~ "High Illness Rate",
       deaths_per_100k > 7 ~ "High Death Rate",
       TRUE ~ "Other"
-    )
-  ) %>%
+    )) %>% ungroup() %>% 
   # Plot on poverty rate and illness rate
   ggplot(aes(x = avg_poverty_perc, y = illnesses_per_100k)) +
   # Plot data points
